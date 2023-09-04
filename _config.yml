@@ -4,7 +4,7 @@ description: "A blog where I share what I've learned about software development 
 
 # Email / Social media user names used by the minima theme:
 # All of these are optional and can be removed or commented out
-email: "example@mail.com"
+# email: "example@mail.com"
 twitter_username: "oxtoacart"
 github_username: "oxtoacart"
 linkedin_username: "percywegmann"
