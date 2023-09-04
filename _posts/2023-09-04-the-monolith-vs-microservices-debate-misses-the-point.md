@@ -1,3 +1,5 @@
+What's the real distinction between monoliths and microservices?
+
 # The Monolith vs Microservices Debate Misses the Point
 
 Percy Wegmann (September 2023)
