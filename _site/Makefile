@@ -4,4 +4,4 @@ build:
 	bundle exec jekyll build
 
 deploy:
-	git subtree push --prefix _site origin gh-pages
+	git fetch && git push origin `git subtree split --prefix _site main`:gh-pages --force-with-lease

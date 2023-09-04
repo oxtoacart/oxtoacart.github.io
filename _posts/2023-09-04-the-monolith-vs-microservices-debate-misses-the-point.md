@@ -1,19 +1,21 @@
-What's the real distinction between monoliths and microservices?
+---
+layout: post
+title: "The Monolith vs Microservices Debate Misses the Point"
+subtitle: "It's not an either/or choice, and sometimes the best architecture applies microservices principles to a monolithic deployment."
+date: 2023-09-04
+---
 
-# The Monolith vs Microservices Debate Misses the Point
-
-Percy Wegmann (September 2023)
-
-So, you need to build a system that exposes some web services. You're trying to decide between a microservices architecture and a monolithic one. The typical advice from organizations like [Amazon AWS](https://aws.amazon.com/compare/the-difference-between-monolithic-and-microservices-architecture/) and [Atlassian](https://www.atlassian.com/microservices/microservices-architecture/microservices-vs-monolith) confuses logical and physical architecture and gives the false impression that it's purely an either/or choice. By instead thinking of the logical and physical architectures separately, we enable ourselves to design solutions that meet the unique needs of our own organizations.
+So, you need to build a system that exposes some web services. You're trying to decide between a microservices architecture and a monolithic one. The typical advice from organizations like [Amazon AWS](https://aws.amazon.com/compare/the-difference-between-monolithic-and-microservices-architecture/) and [Atlassian](https://www.atlassian.com/microservices/microservices-architecture/microservices-vs-monolith) confuses logical and physical architecture and gives the false impression that it's purely an either/or choice. Instead, thinking about the logical and physical architectures separately, we enable ourselves to design solutions that meet the unique needs of our own organizations.
 
 In this article, I'll explain the logical architecture of Amazon's example, show how Amazon translates this logical architecture into the stereotypical monolithic and microservices deployment architectures, demonstrate an alternative deployment architecture that shows how to blend a microservices logical architecture with a monolithic physical architecture, discuss the benefits of such an approach in the context of the claimed benefits of microservices, and finish with some thoughts on where each style of deployment applies.
 
 ## Definitions
-Service - A software component with a well defined interface that performs some kind of work on behalf of other software components, which interact with this service exclusively through its published interface.
+**Service** - A software component with a well defined interface that performs some kind of work on behalf of other software components, which interact with this service exclusively through its published interface.
 
-Domain Object - A software component that encapsulates state used by services, and which may refer to and interact with other domain objects used by that same service. Domain objects are private to a service and invisible to other services.
+**Domain Object** - A software component that encapsulates state used by services, and which may refer to and interact with other domain objects used by that same service. Domain objects are private to a service and invisible to other services.
 
 ## Logical Architecture of a Monolith
+<center>
 {% plantuml %}
 
 component MonolithService {
@@ -31,14 +33,16 @@ Post -down- posts
 ListThreads -down- threads
 
 {% endplantuml %}
+</center>
 
-This UML 2.0 [Component Diagram](https://developer.ibm.com/articles/the-component-diagram/) shows a more fully fleshed out version of Amazon's hypothetical monolith. The `MonolithService` uses three different domain objects internally to represent its data, and it exposes various interfaces to the outside world to allow managing that state. The example only shows a subset of the interfaces that would be available on a full implementation of such a system.
+This UML 2.0 [Component Diagram](https://developer.ibm.com/articles/the-component-diagram/) shows a more fully fleshed out version of Amazon's hypothetical monolith. The example only shows a subset of the interfaces that would be available on a full implementation of such a system.
 
-The MonolithService internally uses multiple domain objects, `Users`, `Threads` and `Posts`. The monolith exposes functions for registering users, logging in, posting messages and listing threads, which it implements by manipulating these domain objects.
+Internally, the `MonolithService` uses three domain objects, `Users`, `Threads` and `Posts`. The monolith exposes functions for registering users, logging in, posting messages and listing threads, which it implements by manipulating these domain objects.
 
-In this kind of architecture, it's not unusual for the domain objects to become tightly coupled, for example modeling a user's posts as a list on the user domain object. As Amazon mentions, "small changes" like altering the structure of the `Users` model can "introduce greater risks" since they can "impact the entire code base". Such coupling created at the domain level also makes it harder to independently evolve each of these domains, leading to a system that becomes more and more difficult to maintain over time.
+In this kind of architecture, it's not unusual for the domain objects to become tightly coupled, for example modeling a user's posts as a list on the `User` domain object. As Amazon mentions, "small changes" like altering the structure of the `Users` model can "introduce greater risks" since they can "impact the entire code base". Such coupling created at the domain level also makes it harder to independently evolve each of these domains, leading to a system that becomes more and more difficult to maintain over time.
 
 ## Decoupling the Monolith
+<center>
 {% plantuml %}
 
 component UserService {
@@ -66,12 +70,14 @@ ListThreads -down- threads
 p -down-> DeletePosts
 
 {% endplantuml %}
+</center>
 
-We can solve the coupling inherent in the monolithic architecture by ... decoupling! Each area of the system now gets its own service, encapsulating its respective domain objects. Any interdependencies between these services are handled via their well-defined public APIs, so if for example the `UserService` needs to delete posts as a result of a user being deleted, it must now do this via an explicitly exposed API on the `PostService` like `DeletePosts`. In this architecture, it becomes possible to independently evolve the implementation of each component without risking the integrity of the entire system.
+We can solve the coupling inherent in the monolithic architecture by ... decoupling! Each area of the system now gets its own service, encapsulating its respective domain objects. Any interdependencies between these services are handled via their well-defined public APIs. For example, if the `UserService` needs to delete posts as a result of a user being deleted, it must now do this via an explicitly exposed API on the `PostService` like `DeletePosts`. In this architecture, it becomes possible to independently evolve the implementation of each component without risking the integrity of the entire system.
 
-This looks a lot like the Microservices architecture that Amazon describes, but you'll note that we haven't yet discussed things like where the components are running, what language they're written in, what protocols they use to communicate with each other and their clients, etc. These are considerations addressed by the deployment architecture.
+This looks a lot like the Microservices architecture that Amazon describes, but you'll note that we haven't discussed things like where the components are deployed, in what language they're written, what protocols they use to communicate with each other and their clients, etc. The deployment architecture will address these considerations.
 
 ## Monolithic Deployment Architecture
+<center>
 {% plantuml %}
 
 cloud MonolithCluster {
@@ -92,10 +98,12 @@ database MonolithDB {
 [MonolithService] .down.> MonolithDB: uses
 
 {% endplantuml %}
+</center>
 
-This represents a fairly typical deployment of a monolithic service, with a cluster of compute nodes hosting the service itself, a single database storing persistent state, and interfaces exposed via REST over HTTP. There's not a lot to deploy, and because the entire system uses a single database, operations that involve coordination across multiple domain models can easily be performed in a single database transaction. As Amazon notes, this does typically require that all of the service logic to be written in the same language, and because the logical architecture allows for a high degree of coupling between domains, the system can grow increasingly difficult to evolve and maintain in the future.
+This represents a fairly typical deployment of a monolithic service, with a cluster of compute nodes hosting the service itself, a single database storing persistent state, and interfaces exposed via REST over HTTP. There's not a lot to deploy, and because the entire system uses a single database, operations that involve coordination across multiple domain models can easily be performed in a single database transaction. Because this logical architecture allows for a high degree of coupling between domains, the system can grow increasingly difficult to evolve and maintain in the future.
 
 ## Stereotypical Microservices Deployment Architecture
+<center>
 {% plantuml %}
 
 cloud UserCluster {
@@ -135,11 +143,12 @@ database PostDB {
 [PostService] .down.> PostDB: uses
 
 {% endplantuml %}
+</center>
 
 This represents the stereotypical microservices deployment. Each service gets its own compute cluster (whether physical or containerized) and its own database. These services expose interfaces for consumption by clients, which may be fronted by an [API Gateway](https://microservices.io/patterns/apigateway.html) (not shown). There's more to deploy, but because each service is deployed independently, they can be implemented using different programming languages and tech stacks, and scaled independently. Unfortunately, operations that involve coordination between services (for example deleting a users' posts when the user is deleted) now can't be handled atomically with just a simple database transaction. Instead, they require some fairly complicated [gymnastics](https://cloud.google.com/architecture/transactional-workflows-microservices-architecture-google-cloud) that can be difficult to implement and even more difficult to monitor and debug.
 
 ## Decoupled Monolith Deployment Architecture
-
+<center>
 {% plantuml %}
 
 cloud MonolithCluster {
@@ -167,6 +176,7 @@ database MonolithDB {
 [PostService] .down.> MonolithDB: uses
 
 {% endplantuml %}
+</center>
 
 This approach deploys a decoupled microservices-like logical architecture into a monolithic physical architecture. This gives the benefits of decoupled services that can evolve independently without having to worry about affecting the whole system, combined with the simplicity of a monolithic deployment model that avoids the overhead of coordinating services across process boundaries. The services are still "micro", they just happen to run in the same process space.
 
