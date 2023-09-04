@@ -1,5 +1,3 @@
-Here you can say lots of fun things about your site.
+I like to build practical stuff. Software is my preferred medium, but I also enjoy tinkering with wood, machines and other media with which I can build useful stuff.
 
-Maybe say a some things about yourself.
-
-Or maybe what you plan to blog about.
+Sometimes we need to learn the hard lessons for ourselves, but other times we have the good fortune (and sense) to learn from others. I've been at this long enough that I've got some lessons to share, so here we are. I don't have all the answers, and certainly I've learned some wrong lessons along the way, but I'll share what I have anyway.
