@@ -1,7 +1,4 @@
-.PHONY: build push
+.PHONY: build
 
 build:
 	bundle exec jekyll build
-
-deploy: build
-	git subtree push --prefix _site origin gh-pages
