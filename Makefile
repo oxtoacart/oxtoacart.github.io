@@ -3,5 +3,10 @@
 build:
 	bundle exec jekyll build
 
-deploy:
-	git subtree push --prefix _site origin gh-pages
+deploy: build
+	cd _site && \
+	git init && \
+	git add . && \
+	git commit -a -m"Deploying" && \
+	git push --force git@github.com:oxtoacart/oxtoacart.github.io.git main:gh-pages && \
+	rm -Rf .git
