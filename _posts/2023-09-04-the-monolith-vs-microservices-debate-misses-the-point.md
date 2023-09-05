@@ -3,6 +3,7 @@ layout: post
 title: "The Monolith vs Microservices Debate Misses the Point"
 subtitle: "It's not an either/or choice, and sometimes the best architecture applies microservices principles to a monolithic deployment."
 date: 2023-09-04
+head-extra: tracking.html
 ---
 
 So, you need to build a system that exposes some web services. You're trying to decide between a microservices architecture and a monolithic one. The typical advice from organizations like [Amazon AWS](https://aws.amazon.com/compare/the-difference-between-monolithic-and-microservices-architecture/) and [Atlassian](https://www.atlassian.com/microservices/microservices-architecture/microservices-vs-monolith) confuses logical and physical architecture and gives the false impression that it's purely an either/or choice. Instead, thinking about the logical and physical architectures separately, we enable ourselves to design solutions that meet the unique needs of our own organizations.
