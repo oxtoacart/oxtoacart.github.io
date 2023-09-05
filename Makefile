@@ -4,7 +4,10 @@ build:
 	bundle exec jekyll build
 
 deploy: build
+	cp CNAME _site/ && \
 	cd _site && \
-	git pull && \
+	git init && \
+	git add . && \
 	git commit -a -m"Deploying" && \
-	git push
+	git push --force git@github.com:oxtoacart/oxtoacart.github.io.git main:gh-pages && \
+	rm -Rf .git
