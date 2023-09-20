@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "Pass Go Structs as Pointers, and Everything Else as Values"
+title: "Pass Go Structs and Arrays as Pointers, Everything Else as Values"
 subtitle: "Don't Overthink It"
 date: 2023-09-20
 head-extra: tracking.html
@@ -14,7 +14,7 @@ Let's start with Google's styleguide.
 
 > This advice does not apply to large structs, or even small structs that may increase in size. In particular, protocol buffer messages should generally be handled by pointer rather than by value. The pointer type satisfies the proto.Message interface (accepted by proto.Marshal, protocmp.Transform, etc.), and protocol buffer messages can be quite large and often grow larger over time.
 
-Okay, so scalar value types like `string`, and interfaces, are clear - pass by value. Structs ... less so. Large (whatever that means) or growable structs should be passed by reference, but small(?) structs should be passed by value. What's the cutoff, is it a question of performance?
+Okay, so scalar value types like `string`, and interfaces, are clear - pass by value. Arrays are also clear - copying them is expensive, so pass them by reference. Structs ... less so. Large (whatever that means) or growable structs should be passed by reference, but small(?) structs should be passed by value. What's the cutoff, is it a question of performance?
 
 > Note: There is a lot of misinformation about whether passing a value or a pointer to a function can affect performance. The compiler can choose to pass pointers to values on the stack as well as copying values on the stack, but these considerations should not outweigh the readability and correctness of the code in most circumstances. When the performance does matter, it is important to profile both approaches with a realistic benchmark before deciding that one approach outperforms the other.
 
@@ -26,8 +26,8 @@ Taken together with the Google styleguide, we arrive at the below candidate heur
 
 ---
 
-1. Types that are not structs, i.e. scalars, slices, maps, interfaces should be passed by value
-2. Big and/or mutable structs should be passed by pointer
+1. Types that are not structs or arrays, i.e. scalars, slices, maps, interfaces should be passed by value.
+2. Arrays and big or mutable structs should be passed by pointer.
 
 ---
 
@@ -56,9 +56,9 @@ So at this point, our candidate heuristics are:
 
 ---
 
-1. Types that are not structs, i.e. scalars, slices, maps, interfaces should be passed by value
-2. Big and/or mutable structs should be passed by pointer
-3. Small structs should be passed by value
+1. Types that are not arrays or structs, i.e. scalars, slices, maps, interfaces should be passed by value.
+2. Arrays and big or mutable structs should be passed by pointer
+3. Small structs should be passed by value.
 
 ---
 
@@ -182,7 +182,7 @@ So where does this leave us? I suggest a fairly simple set of heuristics. As alw
 
 2. Struct types that don't export their members and are clearly built as immutable value types, like `time.Time`, should be passed by value. Note that these types are relatively rare, and are even rarer to be defined by you.
 
-3. All other struct types should be passed by pointer, whether small, large, stateful, or whatever.
+3. Arrays and all other struct types should be passed by pointer, whether small, large, stateful, or whatever.
 
 4. If you're passing data that could be mutated by a concurrent process and its important to you for that data not to be mutated, explicitly make a copy of it before passing it along. Be aware that you can't just rely on passing the data by value since that does not create a deep copy.
 
