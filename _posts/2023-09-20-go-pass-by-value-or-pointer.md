@@ -174,17 +174,17 @@ Escape analysis now shows that interacting with those commonly used functions ca
 ./alloc.go:23:9: t escapes to heap
 ```
 
-So where does this leave us? I suggest a fairly simple set of heuristics. As always, there'll be edge cases where these don't work, but for most cases most of the time, these are make a good baseline.
+So where does this leave us? I suggest a fairly simple set of heuristics that applies to both function parameters as well as method receivers. As always, there'll be edge cases where these don't work, but for most cases most of the time, these are make a good baseline.
 
 ---
 
-1. Types that are not structs or arrays should be passed by value and use value receivers.
+1. **Types that are not structs or arrays should be passed by value.**
 
-2. Struct types that don't export their members and are clearly built as immutable value types, like `time.Time`, should be passed by value. Note that these types are relatively rare, and are even rarer to be defined by you.
+2. **Struct types that don't export their members and are clearly built as immutable value types, like `time.Time`, should be passed by value. Note that these types are relatively rare, and are even rarer to be defined by you.**
 
-3. Arrays and all other struct types should be passed by pointer, whether small, large, stateful, or whatever.
+3. **Arrays and all other struct types should be passed by pointer, whether small, large, stateful, or whatever.**
 
-4. If you're passing data that could be mutated by a concurrent process and its important to you for that data not to be mutated, explicitly make a copy of it before passing it along. Be aware that you can't just rely on passing the data by value since that does not create a deep copy.
+4. **If you're passing data that could be mutated by a concurrent process and its important to you for that data not to be mutated, explicitly make a copy of it before passing it along. Be aware that you can't just rely on passing the data by value since that does not create a deep copy.**
 
 ---
 
