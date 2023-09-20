@@ -174,7 +174,7 @@ Escape analysis now shows that interacting with those commonly used functions ca
 ./alloc.go:23:9: t escapes to heap
 ```
 
-So where does this leave us? I suggest a fairly simple set of heuristics that applies to both function parameters as well as method receivers. As always, there'll be edge cases where these don't work, but for most cases most of the time, these are make a good baseline.
+So where does this leave us? I suggest a fairly simple set of heuristics that applies to both function parameters as well as method receivers. As always, there'll be edge cases where these don't work, but for most cases most of the time, these make a good baseline.
 
 ---
 
