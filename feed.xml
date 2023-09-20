@@ -1,0 +1,355 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.3.2">Jekyll</generator><link href="https://blog.percywegmann.com/feed.xml" rel="self" type="application/atom+xml" /><link href="https://blog.percywegmann.com/" rel="alternate" type="text/html" /><updated>2023-09-20T11:31:46-05:00</updated><id>https://blog.percywegmann.com/feed.xml</id><title type="html">Lessons Learned</title><subtitle>A blog where I share what I&apos;ve learned about software development and random hobbies</subtitle><author><name>Percy Wegmann</name></author><entry><title type="html">Pass Go Structs and Arrays as Pointers, Everything Else as Values</title><link href="https://blog.percywegmann.com/2023/09/20/go-pass-by-value-or-pointer.html" rel="alternate" type="text/html" title="Pass Go Structs and Arrays as Pointers, Everything Else as Values" /><published>2023-09-20T00:00:00-05:00</published><updated>2023-09-20T00:00:00-05:00</updated><id>https://blog.percywegmann.com/2023/09/20/go-pass-by-value-or-pointer</id><content type="html" xml:base="https://blog.percywegmann.com/2023/09/20/go-pass-by-value-or-pointer.html"><![CDATA[<p>At work, we recently started a discussion on when to pass function arguments as pointers (by reference) and when to pass by value. A related (but subtly different) question is whether to use pointer <a href="https://go.dev/ref/spec#Method_declarations">receivers</a> or value receivers. Unfortunately, Go’s documentation and standard library aren’t clear on this point, and Google’s Go styleguide has <a href="https://google.github.io/styleguide/go/decisions#pass-values">some guidance</a>, but it’s a bit too handwavy.</p>
+
+<p>Let’s start with Google’s styleguide.</p>
+
+<blockquote>
+  <p>Do not pass pointers as function arguments just to save a few bytes. If a function reads its argument x only as <em>x throughout, then the argument shouldn’t be a pointer. Common instances of this include passing a pointer to a string (</em>string) or a pointer to an interface value (*io.Reader). In both cases, the value itself is a fixed size and can be passed directly.</p>
+</blockquote>
+
+<blockquote>
+  <p>This advice does not apply to large structs, or even small structs that may increase in size. In particular, protocol buffer messages should generally be handled by pointer rather than by value. The pointer type satisfies the proto.Message interface (accepted by proto.Marshal, protocmp.Transform, etc.), and protocol buffer messages can be quite large and often grow larger over time.</p>
+</blockquote>
+
+<p>Okay, so scalar value types like <code class="language-plaintext highlighter-rouge">string</code>, and interfaces, are clear - pass by value. Arrays are also clear - copying them is expensive, so pass them by reference. Structs … less so. Large (whatever that means) or growable structs should be passed by reference, but small(?) structs should be passed by value. What’s the cutoff, is it a question of performance?</p>
+
+<blockquote>
+  <p>Note: There is a lot of misinformation about whether passing a value or a pointer to a function can affect performance. The compiler can choose to pass pointers to values on the stack as well as copying values on the stack, but these considerations should not outweigh the readability and correctness of the code in most circumstances. When the performance does matter, it is important to profile both approaches with a realistic benchmark before deciding that one approach outperforms the other.</p>
+</blockquote>
+
+<p>Okay, so stuff like stack vs heap allocation, and copying, matters from a performance perspective. We’ll get back to this later.</p>
+
+<p>What about the standard library? Here, I’m most familiar with the <a href="https://pkg.go.dev/net">net</a>, <a href="https://pkg.go.dev/net/http">net/http</a> and <a href="https://pkg.go.dev/crypto/tls">crypto/tls</a> packages. In these packages, most of the value types are things like <code class="language-plaintext highlighter-rouge">net.IP</code> or <code class="language-plaintext highlighter-rouge">http.Header</code> which aren’t structs, but rather slices or maps or scalars of some sort, and these are always passed as values (not pointers). The struct types are mostly stateful mutable things like <code class="language-plaintext highlighter-rouge">net.TCPConn</code> or <code class="language-plaintext highlighter-rouge">http.Server</code>, and often they’re wrapped by interfaces like <code class="language-plaintext highlighter-rouge">net.Conn</code>. The concrete structs are always passed by pointer, and the interfaces are always passed by value.</p>
+
+<p>Taken together with the Google styleguide, we arrive at the below candidate heuristics:</p>
+
+<hr />
+
+<ol>
+  <li>Types that are not structs or arrays, i.e. scalars, slices, maps, interfaces should be passed by value.</li>
+  <li>Arrays and big or mutable structs should be passed by pointer.</li>
+</ol>
+
+<hr />
+
+<p>Still, I’m left wondering about the elusive “small” structs. Thankfully, my hunt for small structs bags a nice <code class="language-plaintext highlighter-rouge">Animal</code> in the <a href="https://pkg.go.dev/encoding/json#example-Unmarshal">example</a> for <code class="language-plaintext highlighter-rouge">json.Unmarshal</code>. Presumably, if the example were an animal decoder function rather than just a <code class="language-plaintext highlighter-rouge">main</code> function, it might look like this:</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">type</span> <span class="n">Animal</span> <span class="k">struct</span> <span class="p">{</span>
+	<span class="n">Name</span>  <span class="kt">string</span>
+	<span class="n">Order</span> <span class="kt">string</span>
+<span class="p">}</span>
+
+<span class="k">func</span> <span class="n">decodeAnimal</span><span class="p">(</span><span class="n">jsonBlob</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="n">Animal</span> <span class="p">{</span>
+	<span class="k">var</span> <span class="n">animal</span> <span class="n">Animal</span>
+	<span class="n">err</span> <span class="o">:=</span> <span class="n">json</span><span class="o">.</span><span class="n">Unmarshal</span><span class="p">(</span><span class="n">jsonBlob</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">animal</span><span class="p">)</span>
+	<span class="k">if</span> <span class="n">err</span> <span class="o">!=</span> <span class="no">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="n">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="n">animal</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>I’ve definitely seen functions like this in use at work, and I see a similar pattern used in the Go <a href="https://go.dev/doc/tutorial/database-access">SQL tutorial</a>. <code class="language-plaintext highlighter-rouge">Animal</code> is a small struct and returning it as a value allows for stack allocation (maybe?). We’ll get back to this later.</p>
+
+<p>So at this point, our candidate heuristics are:</p>
+
+<hr />
+
+<ol>
+  <li>Types that are not arrays or structs, i.e. scalars, slices, maps, interfaces should be passed by value.</li>
+  <li>Arrays and big or mutable structs should be passed by pointer</li>
+  <li>Small structs should be passed by value.</li>
+</ol>
+
+<hr />
+
+<p>But wait, there’s more! When talking about the closely related method receivers, the Google styleguide provides several recommendations on when to use pointer receivers, including:</p>
+
+<blockquote>
+  <p>There are cases where you must use a pointer value. In other cases, pick pointers for large types or as future-proofing if you don’t have a good sense of how the code will grow, and use values for simple plain old data</p>
+</blockquote>
+
+<blockquote>
+  <p>If the method needs to mutate the receiver, the receiver must be a pointer.</p>
+</blockquote>
+
+<blockquote>
+  <p>If the receiver is a struct containing fields that cannot safely be copied, use a pointer receiver. Common examples are sync.Mutex and other synchronization types.</p>
+</blockquote>
+
+<p>Okay, cool, so “small” structs should be treated as values, unless they need to be mutated, or they contain fields that can’t be safely copied, or they may eventually evolve into something that meets one of the above criteria. At this point, it seems simpler to me to just pass all structs as references, what rationale is there for not doing this?</p>
+
+<p>According to the Google styleguide</p>
+
+<blockquote>
+  <p>If the receiver is a “small” array or struct that is naturally a value type with no mutable fields and no pointers, a value receiver is usually the right choice.</p>
+</blockquote>
+
+<p>Here they give the example of <code class="language-plaintext highlighter-rouge">time.Time</code>, which is explicitly defined as an immutable type with mutators that return new <code class="language-plaintext highlighter-rouge">time.Time</code> instances. Another good example of such a type is Shopspring’s <a href="https://github.com/shopspring/decimal">decimal</a> type. It seems to me here that the defining characteristic of these types is not that they’re small, but rather that their APIs have been designed to hide their fields from consumers and instead expose mutators that return new values. In essence, these feel a lot like built-in value types such as <code class="language-plaintext highlighter-rouge">string</code>, <code class="language-plaintext highlighter-rouge">int</code>, etc, and if Go were a more extensible language these might actually behave just like those types. I can get on board with this.</p>
+
+<blockquote>
+  <p>For methods that will call or run concurrently with other functions that modify the receiver, use a value if those modifications should not be visible to your method; otherwise use a pointer.</p>
+</blockquote>
+
+<p>This sounds plausible in principle, but for me, it comes up very rarely in practice. Also, the devil is in the details. In the one specific case I can think of, the type in question was in fact a slice. Passing a slice by value doesn’t cause the underlying array to be copied, so I had to explicitly copy it before passing it along. Even if I had wrapped the slice in a struct as shown below, passing the struct by value wouldn’t have helped because both structs would still have been referring to the same underlying array.</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">type</span> <span class="n">thing</span> <span class="k">struct</span> <span class="p">{</span>
+	<span class="n">s</span> <span class="p">[]</span><span class="n">otherThing</span><span class="p">{}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>So here’s another rub - <em>passing a struct by value doesn’t actually guarantee that you won’t have shared state</em>, if the fields on the struct are themselves pointers or pointer-like things (e.g. maps and slices). If you need to make sure you have a copy, you should really explicitly make a deep copy yourself. So yeah, this recommendation doesn’t hold water.</p>
+
+<blockquote>
+  <p>If the receiver is a “large” struct or array, a pointer receiver may be more efficient.</p>
+</blockquote>
+
+<p>The corrolary to this is that for “small” structs, passing by value may be more efficient, presumably because small structs can be stack allocated when passed by value. In practice though, this isn’t the case, both because a) Go’s escape analysis is smart enough to stack allocate even pointer variables in some cases and b) interacting with APIs that take <code class="language-plaintext highlighter-rouge">interface{}</code> parameters like <code class="language-plaintext highlighter-rouge">json.Unmarshal()</code> and <code class="language-plaintext highlighter-rouge">fmt.Println()</code> causes even small struct values to end up on the heap.</p>
+
+<p>We can explore this using <code class="language-plaintext highlighter-rouge">go build -gcflags "-m"</code>. Let’s walk through an example.</p>
+
+<p>First, let’s take some code that does the “wrong” thing and passes a small struct by pointer.</p>
+
+<figure class="highlight"><pre><code class="language-go" data-lang="go"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+</pre></td><td class="code"><pre><span class="k">package</span> <span class="n">alloc</span>
+
+<span class="k">type</span> <span class="n">thing</span> <span class="k">struct</span> <span class="p">{</span>
+	<span class="n">A</span> <span class="kt">string</span>
+	<span class="n">B</span> <span class="kt">int</span>
+<span class="p">}</span>
+
+<span class="k">func</span> <span class="n">doStuff</span><span class="p">(</span><span class="n">t</span> <span class="o">*</span><span class="n">thing</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c">// do something with t</span>
+<span class="p">}</span>
+
+<span class="k">func</span> <span class="n">loadAndDoStuff</span><span class="p">()</span> <span class="p">{</span>
+	<span class="n">t</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="n">thing</span><span class="p">{}</span>
+	<span class="n">t</span><span class="o">.</span><span class="n">A</span> <span class="o">=</span> <span class="s">"hello"</span>
+	<span class="n">t</span><span class="o">.</span><span class="n">B</span> <span class="o">=</span> <span class="m">42</span>
+	<span class="n">doStuff</span><span class="p">(</span><span class="n">t</span><span class="p">)</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre></figure>
+
+<p>Compiling with escape analysis we see that <code class="language-plaintext highlighter-rouge">&amp;thing{}</code> does not escape and will be stack allocated.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code># alloc
+./alloc.go:8:6: can inline doStuff
+./alloc.go:12:6: can inline loadAndDoStuff
+./alloc.go:16:9: inlining call to doStuff
+./alloc.go:8:14: t does not escape
+./alloc.go:13:7: &amp;thing{} does not escape
+</code></pre></div></div>
+
+<p>Now, let’s do the “right” thing by passing <code class="language-plaintext highlighter-rouge">thing{}</code> as a value, but let’s also interact with <code class="language-plaintext highlighter-rouge">json.Marshal()</code> and <code class="language-plaintext highlighter-rouge">fmt.Println()</code>.</p>
+
+<figure class="highlight"><pre><code class="language-go" data-lang="go"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+</pre></td><td class="code"><pre><span class="k">package</span> <span class="n">alloc</span>
+
+<span class="k">import</span> <span class="p">(</span>
+	<span class="s">"encoding/json"</span>
+	<span class="s">"fmt"</span>
+<span class="p">)</span>
+
+<span class="k">type</span> <span class="n">thing</span> <span class="k">struct</span> <span class="p">{</span>
+	<span class="n">A</span> <span class="kt">string</span>
+	<span class="n">B</span> <span class="kt">int</span>
+<span class="p">}</span>
+
+<span class="k">func</span> <span class="n">doStuff</span><span class="p">(</span><span class="n">t</span> <span class="n">thing</span><span class="p">)</span> <span class="p">{</span>
+	<span class="n">fmt</span><span class="o">.</span><span class="n">Println</span><span class="p">(</span><span class="n">t</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="k">func</span> <span class="n">loadAndDoStuff</span><span class="p">()</span> <span class="p">{</span>
+	<span class="k">var</span> <span class="n">t</span> <span class="n">thing</span>
+	<span class="n">err</span> <span class="o">:=</span> <span class="n">json</span><span class="o">.</span><span class="n">Unmarshal</span><span class="p">([]</span><span class="kt">byte</span><span class="p">(</span><span class="s">`{"A":"hello","B":42}`</span><span class="p">),</span> <span class="o">&amp;</span><span class="n">t</span><span class="p">)</span>
+	<span class="k">if</span> <span class="n">err</span> <span class="o">!=</span> <span class="no">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="n">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="n">doStuff</span><span class="p">(</span><span class="n">t</span><span class="p">)</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre></figure>
+
+<p>Escape analysis now shows that interacting with those commonly used functions causes our struct to escape to the heap. So, we have the worst of both worlds - no stack allocation, but we still end up copying <code class="language-plaintext highlighter-rouge">thing</code> when calling <code class="language-plaintext highlighter-rouge">doStuff()</code>.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./alloc.go:13:6: can inline doStuff
+./alloc.go:14:13: inlining call to fmt.Println
+./alloc.go:23:9: inlining call to doStuff
+./alloc.go:23:9: inlining call to fmt.Println
+./alloc.go:13:14: leaking param: t
+./alloc.go:14:13: ... argument does not escape
+./alloc.go:14:14: t escapes to heap
+./alloc.go:18:6: moved to heap: t
+./alloc.go:19:31: ([]byte)(`{"A":"hello","B":42}`) escapes to heap
+./alloc.go:23:9: ... argument does not escape
+./alloc.go:23:9: t escapes to heap
+</code></pre></div></div>
+
+<p>So where does this leave us? I suggest a fairly simple set of heuristics that applies to both function parameters as well as method receivers. As always, there’ll be edge cases where these don’t work, but for most cases most of the time, these make a good baseline.</p>
+
+<hr />
+
+<ol>
+  <li>
+    <p><strong>Types that are not structs or arrays should be passed by value.</strong></p>
+  </li>
+  <li>
+    <p><strong>Struct types that don’t export their members and are clearly built as immutable value types, like <code class="language-plaintext highlighter-rouge">time.Time</code>, should be passed by value. Note that these types are relatively rare, and are even rarer to be defined by you.</strong></p>
+  </li>
+  <li>
+    <p><strong>Arrays and all other struct types should be passed by pointer, whether small, large, stateful, or whatever.</strong></p>
+  </li>
+  <li>
+    <p><strong>If you’re passing data that could be mutated by a concurrent process and its important to you for that data not to be mutated, explicitly make a copy of it before passing it along. Be aware that you can’t just rely on passing the data by value since that does not create a deep copy.</strong></p>
+  </li>
+</ol>
+
+<hr />
+
+<p>I’ve personally followed basically these heuristics for years, and they line up well with lots of the Go standard library, but it’s nice to have some reasoned justification for them rather than just my intuition. Plus, in addition to working well in a lot of cases, I appreciate these heuristics for their simplicity–they leave little room for ad-hoc judgement calls and free up mental bandwidth for more difficult problems.</p>]]></content><author><name>Percy Wegmann</name></author><summary type="html"><![CDATA[At work, we recently started a discussion on when to pass function arguments as pointers (by reference) and when to pass by value. A related (but subtly different) question is whether to use pointer receivers or value receivers. Unfortunately, Go’s documentation and standard library aren’t clear on this point, and Google’s Go styleguide has some guidance, but it’s a bit too handwavy.]]></summary></entry><entry><title type="html">The Monolith vs Microservices Debate Misses the Point</title><link href="https://blog.percywegmann.com/2023/09/04/the-monolith-vs-microservices-debate-misses-the-point.html" rel="alternate" type="text/html" title="The Monolith vs Microservices Debate Misses the Point" /><published>2023-09-04T00:00:00-05:00</published><updated>2023-09-04T00:00:00-05:00</updated><id>https://blog.percywegmann.com/2023/09/04/the-monolith-vs-microservices-debate-misses-the-point</id><content type="html" xml:base="https://blog.percywegmann.com/2023/09/04/the-monolith-vs-microservices-debate-misses-the-point.html"><![CDATA[<p>So, you need to build a system that exposes some web services. You’re trying to decide between a microservices architecture and a monolithic one. The typical advice from organizations like <a href="https://aws.amazon.com/compare/the-difference-between-monolithic-and-microservices-architecture/">Amazon AWS</a> and <a href="https://www.atlassian.com/microservices/microservices-architecture/microservices-vs-monolith">Atlassian</a> confuses logical and physical architecture and gives the false impression that it’s purely an either/or choice. Instead, thinking about the logical and physical architectures separately, we enable ourselves to design solutions that meet the unique needs of our own organizations.</p>
+
+<p>In this article, I’ll explain the logical architecture of Amazon’s example, show how Amazon translates this logical architecture into the stereotypical monolithic and microservices deployment architectures, demonstrate an alternative deployment architecture that shows how to blend a microservices logical architecture with a monolithic physical architecture, discuss the benefits of such an approach in the context of the claimed benefits of microservices, and finish with some thoughts on where each style of deployment applies.</p>
+
+<h2 id="definitions">Definitions</h2>
+<p><strong>Service</strong> - A software component with a well defined interface that performs some kind of work on behalf of other software components, which interact with this service exclusively through its published interface.</p>
+
+<p><strong>Domain Object</strong> - A software component that encapsulates state used by services, and which may refer to and interact with other domain objects used by that same service. Domain objects are private to a service and invisible to other services.</p>
+
+<h2 id="logical-architecture-of-a-monolith">Logical Architecture of a Monolith</h2>
+<center>
+<p><object data="/uml/7ef9a840bf01ba9e0360606b0e55672a.svg" type="image/svg+xml" class="plantuml"></object></p>
+</center>
+
+<p>This UML 2.0 <a href="https://developer.ibm.com/articles/the-component-diagram/">Component Diagram</a> shows a more fully fleshed out version of Amazon’s hypothetical monolith. The example only shows a subset of the interfaces that would be available on a full implementation of such a system.</p>
+
+<p>Internally, the <code class="language-plaintext highlighter-rouge">MonolithService</code> uses three domain objects, <code class="language-plaintext highlighter-rouge">Users</code>, <code class="language-plaintext highlighter-rouge">Threads</code> and <code class="language-plaintext highlighter-rouge">Posts</code>. The monolith exposes functions for registering users, logging in, posting messages and listing threads, which it implements by manipulating these domain objects.</p>
+
+<p>In this kind of architecture, it’s not unusual for the domain objects to become tightly coupled, for example modeling a user’s posts as a list on the <code class="language-plaintext highlighter-rouge">User</code> domain object. As Amazon mentions, “small changes” like altering the structure of the <code class="language-plaintext highlighter-rouge">Users</code> model can “introduce greater risks” since they can “impact the entire code base”. Such coupling created at the domain level also makes it harder to independently evolve each of these domains, leading to a system that becomes more and more difficult to maintain over time.</p>
+
+<h2 id="decoupling-the-monolith">Decoupling the Monolith</h2>
+<center>
+<p><object data="/uml/31dba6f149ad59e820395610b16d9fb8.svg" type="image/svg+xml" class="plantuml"></object></p>
+</center>
+
+<p>We can solve the coupling inherent in the monolithic architecture by … decoupling! Each area of the system now gets its own service, encapsulating its respective domain objects. Any interdependencies between these services are handled via their well-defined public APIs. For example, if the <code class="language-plaintext highlighter-rouge">UserService</code> needs to delete posts as a result of a user being deleted, it must now do this via an explicitly exposed API on the <code class="language-plaintext highlighter-rouge">PostService</code> like <code class="language-plaintext highlighter-rouge">DeletePosts</code>. In this architecture, it becomes possible to independently evolve the implementation of each component without risking the integrity of the entire system.</p>
+
+<p>This looks a lot like the Microservices architecture that Amazon describes, but you’ll note that we haven’t discussed things like where the components are deployed, in what language they’re written, what protocols they use to communicate with each other and their clients, etc. The deployment architecture will address these considerations.</p>
+
+<h2 id="monolithic-deployment-architecture">Monolithic Deployment Architecture</h2>
+<center>
+<p><object data="/uml/672fa607d23e330dc202281f05986f8e.svg" type="image/svg+xml" class="plantuml"></object></p>
+</center>
+
+<p>This represents a fairly typical deployment of a monolithic service, with a cluster of compute nodes hosting the service itself, a single database storing persistent state, and interfaces exposed via REST over HTTP. There’s not a lot to deploy, and because the entire system uses a single database, operations that involve coordination across multiple domain models can easily be performed in a single database transaction. Because this logical architecture allows for a high degree of coupling between domains, the system can grow increasingly difficult to evolve and maintain in the future.</p>
+
+<h2 id="stereotypical-microservices-deployment-architecture">Stereotypical Microservices Deployment Architecture</h2>
+<center>
+<p><object data="/uml/42f9cb82e274263f04ac124140dbcc94.svg" type="image/svg+xml" class="plantuml"></object></p>
+</center>
+
+<p>This represents the stereotypical microservices deployment. Each service gets its own compute cluster (whether physical or containerized) and its own database. These services expose interfaces for consumption by clients, which may be fronted by an <a href="https://microservices.io/patterns/apigateway.html">API Gateway</a> (not shown). There’s more to deploy, but because each service is deployed independently, they can be implemented using different programming languages and tech stacks, and scaled independently. Unfortunately, operations that involve coordination between services (for example deleting a users’ posts when the user is deleted) now can’t be handled atomically with just a simple database transaction. Instead, they require some fairly complicated <a href="https://cloud.google.com/architecture/transactional-workflows-microservices-architecture-google-cloud">gymnastics</a> that can be difficult to implement and even more difficult to monitor and debug.</p>
+
+<h2 id="decoupled-monolith-deployment-architecture">Decoupled Monolith Deployment Architecture</h2>
+<center>
+<p><object data="/uml/d23ae96fe8f0957eeae516a215c375fb.svg" type="image/svg+xml" class="plantuml"></object></p>
+</center>
+
+<p>This approach deploys a decoupled microservices-like logical architecture into a monolithic physical architecture. This gives the benefits of decoupled services that can evolve independently without having to worry about affecting the whole system, combined with the simplicity of a monolithic deployment model that avoids the overhead of coordinating services across process boundaries. The services are still “micro”, they just happen to run in the same process space.</p>
+
+<h2 id="but-what-about-">But what about …</h2>
+<p>Articles about microservices architectures tout various benefits. Does the Decoupled Monolith deliver on these?</p>
+
+<h3 id="innovate-faster">Innovate faster</h3>
+<p>Amazon claims that a downside of monolithic architectures is that</p>
+
+<blockquote>
+  <p>Developers cannot rebuild certain parts of the code base with new technological frameworks, which delays your organization in adopting modern technological trends.</p>
+</blockquote>
+
+<p>I’ll confess here that I have a bias against frameworks. In my experience, frameworks like Spring, Django, etc are a crutch that helps projects get off the ground quickly but that ends up slowing them down in the long term. Because frameworks force your system into a specific structure that’s not typically designed to be readily interchangeable, they are indeed difficult to replace. In the Go world, we tend to avoid frameworks and focus instead on using smaller libraries that are easily swapped out. In a framework-free world, it’s rare that a new shiny thing comes along that confers a significant advantage over what came before, when it does, it’s not usually too hard to swap it in. Furthermore, if something convincingly superior comes along, why only apply it to new services rather than applying its benefits across the board?</p>
+
+<p>The other aspect to velocity is team flexibility. Maybe you work in a giant company where each “microservice” has a team of 10 engineers working on it, but in a smaller company and especially a startup, developers often need to wear many hats. Have you ever had to step into a system using a different language, different design patterns, and/or different deployment environments in order to help out with implementing the latest high priority project? In my experience, that learning curve is the exact opposite of fast. By contrast, in a decoupled monolith, everything tends towards consistency, making it easier for any developer to step into any service as projects demand and staffing allows. That’s agility.</p>
+
+<h3 id="reduce-risks">Reduce risks</h3>
+<p>Amazon states that in a monolithic application</p>
+
+<blockquote>
+  <p>A minor error in the code base can cause the whole application to fail. Such incidents have the potential to cause severe service outages and affect all active users.</p>
+</blockquote>
+
+<p>Furthermore</p>
+
+<blockquote>
+  <p>when developers introduce new changes to a monolithic application, they must retest and redeploy the entire system</p>
+</blockquote>
+
+<p>Microservices aren’t immune to this. What happens in the example system if the User service goes down and people can’t log in anymore, or the Thread service goes down and users can’t view threads anymore? Is that a significantly better user experience than the entire site going down?</p>
+
+<p>And what’s so bad about retesting an entire system if one component changes? That’s a good practice no matter what your architecture, and if you have good test coverage and thoughtfully implemented tests that can run in parallel, complete relatively quickly and don’t fail spuriously, running tests should be something to cherish, not to avoid. And oh by the way, if your tests don’t have to simulate interactions across process boundaries in a complex microservices architecture, they’ll likely be easier to write and quicker to execute anyway.</p>
+
+<h3 id="accelerate-time-to-market">Accelerate time to market</h3>
+<p>Per Amazon, a microservices architecture accelerates development because</p>
+
+<blockquote>
+  <p>each developer focuses on a smaller chunk of code instead of a large one. When developers create a specific microservice, they don’t need to understand how other microservices work. They only need to use the appropriate APIs, which are faster and easier to learn.</p>
+</blockquote>
+
+<p>This is almost exclusively the result a logical architecture that follows a microservices pattern and doesn’t require a microservices deployment architecture. In the decoupled monolith, developers can focus on specific services without needing to know the implementation details of other services, since their services interact purely at the level of interfaces. Developers do need to know about shared components like logging libraries, but being able to reuse boilerplate stuff like that is more of a benefit than a burden–the cognitive load is limited to understanding and consistently applying corporate standard programming patterns, a good habit if you want to avoid a corporate codebase that’s a free for all.</p>
+
+<h3 id="reduce-total-cost-of-ownership">Reduce total cost of ownership</h3>
+<p>According to Amazon</p>
+
+<blockquote>
+  <p>You can scale microservice applications horizontally by adding compute resources on demand. You only have to add resources for the individual service, not the entire application. To scale monolithic systems, companies must upgrade memory and processing power for the application as a whole, which is more expensive.</p>
+</blockquote>
+
+<p>This is true only in as much as your services can’t scale horizontally. Making the compute cluster scale horizontally is usually not too hard if you design for that from the beginning, and even the database tier can be scaled horizontally using technologies like Google’s <a href="https://cloud.google.com/spanner">Cloud Spanner</a> or Amazon’s own <a href="https://aws.amazon.com/rds/aurora/">Aurora</a>. Admittedly, these are not without their own complexities, but the days of applications that can’t scale horizontally are largely behind us.</p>
+
+<h2 id="the-escape-hatch">The escape hatch</h2>
+<p>So what happens if you do have a service that can’t scale horizontally, or a service that absolutely has to be written in a specific language or deployed into a specific, unique environment? Go ahead, factor it out of the monolith. Since services in the decoupled monolith communicate with each other through interfaces, aside from maybe participating in the same database transaction, they largely don’t care whether they’re in the same process or not–moving a service out of process just requires adding an adapter that speaks REST or whatever wire protocol you choose. But, just because you may have one or two services that benefit from this style of deployment doesn’t mean that the rest of the system has to be split apart.</p>
+
+<h2 id="what-situations-might-warrant-a-microservices-deployment-architecture">What situations might warrant a microservices deployment architecture?</h2>
+<p>You’ll notice that the Amazon example we’ve worked with involves a relatively tightly focused system that largely depends on all three parts of it working in concert. Similarly, the example of Netflix cited by the Atlassian article is really just one application - a video streaming platform. As discussed in this article, a microservices style deployment doesn’t necessarily make sense here.</p>
+
+<p>Atlassian’s own experience is meaningfully different. Atlassian operates a suite of products including bug tracking, version control, project management, incident management and others. These products are only loosely related in that they share a user model and can link to each other in useful ways (for example, a bug can link to a pull request in the source repository). You can imagine that such links can also exist to/from external alternatives to these apps, so for example you could link from a Jira ticket to a GitHub PR. This means that in practice, these applications operate extremely loosely coupled the way that different websites and applications operate loosely coupled on the internet.</p>
+
+<p>Furthermore, from an organizational perspective, each Atlassian application likely has its own product and project managers, its own development team, its own schedule, and so on. In this case, does it make sense to force all of their developers to coordinate in a single source repo and deploy to a single cluster, or does it make more sense to allow them to evolve and deploy independently? Probably the latter. Is that a “microservices” architecture, or is that just a very large company with each division running its own monolith on some shared infrastructure like a Kubernetes cluster? I’m not sure the distinction matters.</p>
+
+<p>Ultimately, it’s not an either/or choice between microservices or monoliths. First, figure out whether you’re dealing with one system (like a user forum or video streaming service), or multiple systems (like Atlassian’s suite of products). Then, for each system, start by designing a logical architecture that factors the system well and makes it easy to evolve and maintain. Lastly, figure out how to deploy this logical architecture into a physical architecture that minimizes complexity while still meeting your scalability needs. If the resulting system doesn’t fit neatly into one of the stereotypical boxes, congratulations, you’ve just designed something appropriate to your own needs!</p>]]></content><author><name>Percy Wegmann</name></author><summary type="html"><![CDATA[So, you need to build a system that exposes some web services. You’re trying to decide between a microservices architecture and a monolithic one. The typical advice from organizations like Amazon AWS and Atlassian confuses logical and physical architecture and gives the false impression that it’s purely an either/or choice. Instead, thinking about the logical and physical architectures separately, we enable ourselves to design solutions that meet the unique needs of our own organizations.]]></summary></entry></feed>

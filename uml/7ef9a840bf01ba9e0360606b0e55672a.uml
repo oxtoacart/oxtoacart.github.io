@@ -1,0 +1,19 @@
+@startuml
+
+
+component MonolithService {
+  component Users
+  component Posts
+  component Threads
+  portin users
+  portin posts
+  portin threads
+}
+
+Register -down- users
+Login -down- users
+Post -down- posts
+ListThreads -down- threads
+
+
+@enduml
