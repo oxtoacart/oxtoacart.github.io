@@ -80,7 +80,7 @@ Here they give the example of `time.Time`, which is explicitly defined as an imm
 
 > For methods that will call or run concurrently with other functions that modify the receiver, use a value if those modifications should not be visible to your method; otherwise use a pointer.
 
-This sounds plausible on in principle, but for me, it comes up very rarely in practice. Also, the devil is in the details. In the one specific case I can think of, the type in question was in fact a slice. Passing a slice by value doesn't cause the underlying array to be copied, so I had to explicitly copy it before passing it along. Even if I had wrapped the slice in a struct as shown below, passing the struct by value wouldn't have helped because both structs would still have been referring to the same underlying array.
+This sounds plausible in principle, but for me, it comes up very rarely in practice. Also, the devil is in the details. In the one specific case I can think of, the type in question was in fact a slice. Passing a slice by value doesn't cause the underlying array to be copied, so I had to explicitly copy it before passing it along. Even if I had wrapped the slice in a struct as shown below, passing the struct by value wouldn't have helped because both structs would still have been referring to the same underlying array.
 
 ```go
 type thing struct {
